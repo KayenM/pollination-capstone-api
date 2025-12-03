@@ -115,11 +115,9 @@ Delete a classification and its image.
 **Live API:** https://capstone-077z.onrender.com
 
 - **Swagger UI:** https://capstone-077z.onrender.com/docs
-- **ReDoc:** https://capstone-077z.onrender.com/redoc
 
 For local development:
 - Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
 
 ## Project Structure
 
