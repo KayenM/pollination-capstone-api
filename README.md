@@ -28,11 +28,14 @@ pip install -r requirements.txt
 ### 2. Run Tests
 
 ```bash
-# Quick standalone test
+# Quick standalone test (local)
 python run_test.py
 
-# Full pytest suite
+# Full pytest suite (local)
 pytest tests/test_api.py -v
+
+# Test live deployed API
+curl https://capstone-077z.onrender.com/
 ```
 
 ### 3. Start the Server
@@ -42,6 +45,8 @@ uvicorn app.main:app --reload
 ```
 
 The API will be available at `http://localhost:8000`
+
+**Note:** You'll need MongoDB configured. See Database section below.
 
 ## API Endpoints
 
@@ -57,7 +62,7 @@ Upload an image for flower classification.
 ```json
 {
   "id": "uuid",
-  "image_path": "uploads/images/uuid.jpg",
+  "image_path": "/api/images/uuid",
   "location": {
     "latitude": 37.7749,
     "longitude": -122.4194
@@ -107,7 +112,12 @@ Delete a classification and its image.
 
 ## API Documentation
 
-When the server is running, visit:
+**Live API:** https://capstone-077z.onrender.com
+
+- **Swagger UI:** https://capstone-077z.onrender.com/docs
+- **ReDoc:** https://capstone-077z.onrender.com/redoc
+
+For local development:
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
@@ -127,9 +137,8 @@ capstone/
 │   ├── __init__.py
 │   └── test_api.py          # Pytest test suite
 ├── requirements.txt
+├── Dockerfile               # Docker configuration for Render
 ├── run_test.py              # Standalone test script
-├── MONGODB_SETUP.md         # MongoDB Atlas setup guide
-├── ARCHITECTURE.md          # Full system architecture guide
 └── README.md
 ```
 
@@ -160,46 +169,77 @@ To integrate your actual model:
 
 **Uses MongoDB Atlas** for persistent cloud storage. Images are stored as base64 in MongoDB documents.
 
-### Setting Up MongoDB
+### Setting Up MongoDB Atlas
 
-1. **Create a free MongoDB Atlas account** at https://www.mongodb.com/cloud/atlas/register
-2. **Create a free cluster** (M0 tier, 512MB storage)
-3. **Get your connection string** from the Atlas dashboard
-4. **Set environment variable:**
-   ```bash
-   export MONGODB_URL="mongodb+srv://username:password@cluster.mongodb.net/flower_classifications"
-   ```
-
-See **[MONGODB_SETUP.md](MONGODB_SETUP.md)** for detailed setup instructions.
+1. Go to https://www.mongodb.com/cloud/atlas/register
+2. Create a free cluster (M0 tier, 512MB storage)
+3. Create a database user and get your connection string
+4. Configure network access to allow connections
+5. Set environment variable with your connection string
 
 ### Local Development
 
-For local testing without MongoDB, the API will show a warning but still start. You'll need MongoDB configured for full functionality.
+Set the MongoDB connection string as an environment variable:
+```bash
+export MONGODB_URL="mongodb+srv://username:password@cluster.mongodb.net/flower_classifications"
+```
+
+Then start the server:
+```bash
+uvicorn app.main:app --reload
+```
 
 ## Deployment
 
-This API is ready for cloud deployment with MongoDB Atlas!
+This API is deployed on **Render.com** with **MongoDB Atlas** for persistent storage.
 
-### Quick Deploy Steps:
+### Live Deployment
 
-1. **Set up MongoDB Atlas** (see [MONGODB_SETUP.md](MONGODB_SETUP.md))
+**API URL:** https://capstone-077z.onrender.com
+
+The API is fully deployed and operational. All data is stored in MongoDB Atlas.
+
+### Deploying Your Own Instance
+
+1. **Set up MongoDB Atlas:**
+   - Create account at https://www.mongodb.com/cloud/atlas
+   - Create free cluster (M0 tier)
+   - Get connection string
+
 2. **Deploy to Render.com:**
    - Push code to GitHub
    - Create new Web Service on Render
-   - Set `MONGODB_URL` environment variable
+   - Set `MONGODB_URL` environment variable with your connection string
+   - Set build command: `pip install -r requirements.txt`
+   - Set start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
    - Deploy!
 
-See **[ARCHITECTURE.md](ARCHITECTURE.md)** for full system architecture including frontend (Vercel) + backend (Render) + MongoDB.
+### Architecture
+
+- **Frontend:** Can be deployed on Vercel or any static hosting
+- **Backend API:** Deployed on Render.com (this repository)
+- **Database:** MongoDB Atlas (cloud-hosted MongoDB)
+- **Storage:** Images stored as base64 in MongoDB documents
 
 ## Environment Variables
 
 ```bash
-# Required for MongoDB
-MONGODB_URL=mongodb+srv://...  # Your MongoDB Atlas connection string
-MONGODB_DATABASE=flower_classifications  # Optional, defaults to this
+# Required - MongoDB connection string
+MONGODB_URL=mongodb+srv://username:password@cluster.mongodb.net/flower_classifications?appName=FreeTier
 
 # Optional
-PORT=8000  # Server port (auto-set by hosting platform)
-CORS_ORIGINS=*  # Allowed frontend origins (comma-separated)
+MONGODB_DATABASE=flower_classifications  # Defaults to this if not specified
+PORT=8000  # Server port (auto-set by Render, uses $PORT)
+CORS_ORIGINS=*  # Allowed frontend origins (comma-separated, * for all)
 ```
+
+### Setting Environment Variables on Render
+
+1. Go to Render dashboard → Your service
+2. Click "Environment" tab
+3. Add `MONGODB_URL` with your connection string
+4. Add any other variables as needed
+5. Service will auto-redeploy
+
+**Important:** Never commit `.env` files or connection strings to GitHub! Always use environment variables.
 

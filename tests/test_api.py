@@ -13,7 +13,6 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.main import app
-from app.database import create_tables, engine, Base
 
 # Test image path
 TEST_IMAGE_PATH = "IMG_1905.jpeg"
@@ -21,16 +20,14 @@ TEST_IMAGE_PATH = "IMG_1905.jpeg"
 
 @pytest.fixture(scope="module")
 def client():
-    """Create a test client with a fresh database."""
-    # Use a test database
-    Base.metadata.create_all(bind=engine)
+    """Create a test client with MongoDB."""
+    # Check for MongoDB connection
+    mongodb_url = os.environ.get("MONGODB_URL")
+    if not mongodb_url:
+        pytest.skip("MONGODB_URL environment variable not set. Set it to run tests.")
     
     with TestClient(app) as test_client:
         yield test_client
-    
-    # Cleanup: remove test database and uploaded files
-    if os.path.exists("flower_classifications.db"):
-        os.remove("flower_classifications.db")
 
 
 @pytest.fixture
@@ -221,9 +218,7 @@ class TestDeleteClassification:
         get_response = client.get(f"/api/classifications/{record_id}")
         assert get_response.status_code == 404
         
-        # Verify image file is gone
-        assert not os.path.exists(image_path)
-        
+        # Note: Images are stored in MongoDB, not filesystem
         print(f"\n✓ Classification {record_id} deleted successfully")
 
 

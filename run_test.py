@@ -9,13 +9,13 @@ Run with: python run_test.py
 import os
 import sys
 import json
+import asyncio
 
 # Ensure we can import from app
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi.testclient import TestClient
 from app.main import app
-from app.database import create_tables
 
 # Test image path
 TEST_IMAGE_PATH = "IMG_1905.jpeg"
@@ -49,8 +49,18 @@ def main():
     
     print_success(f"Found test image: {TEST_IMAGE_PATH}")
     
-    # Create test client
-    create_tables()
+    # Check for MongoDB connection
+    mongodb_url = os.environ.get("MONGODB_URL")
+    if not mongodb_url:
+        print_error("MONGODB_URL environment variable not set!")
+        print("  Set it with: export MONGODB_URL='your-connection-string'")
+        return 1
+    
+    # Create test client - it will trigger startup events
+    # But we need to ensure MongoDB URL is set
+    print_success("MongoDB URL configured")
+    
+    # Create test client (startup events should run)
     client = TestClient(app)
     
     # Test 1: Health Check
