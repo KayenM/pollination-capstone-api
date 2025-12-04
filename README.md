@@ -115,11 +115,9 @@ Delete a classification and its image.
 **Live API:** https://capstone-077z.onrender.com
 
 - **Swagger UI:** https://capstone-077z.onrender.com/docs
-- **ReDoc:** https://capstone-077z.onrender.com/redoc
 
 For local development:
 - Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
 
 ### Quick Architecture Overview
 
@@ -246,9 +244,8 @@ The API is fully deployed and operational. All data is stored in MongoDB Atlas.
    - Push code to GitHub
    - Create new Web Service on Render
    - Set `MONGODB_URL` environment variable with your connection string
-   - Set build command: `pip install -r requirements.txt`
-   - Set start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
    - Deploy!
+   - Everytime your GitHub repo is updated, Render will redeploy
 
 ### Architecture
 
@@ -276,6 +273,4 @@ CORS_ORIGINS=*  # Allowed frontend origins (comma-separated, * for all)
 3. Add `MONGODB_URL` with your connection string
 4. Add any other variables as needed
 5. Service will auto-redeploy
-
-**Important:** Never commit `.env` files or connection strings to GitHub! Always use environment variables.
 
