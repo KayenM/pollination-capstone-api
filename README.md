@@ -121,6 +121,41 @@ For local development:
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
+### Quick Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    External Clients                          │
+│  (Frontend, API Clients, Browser)                            │
+└──────────────────────────┬──────────────────────────────────┘
+                           │ HTTP/REST
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Render.com (FastAPI Application)                │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  API Routes:                                         │   │
+│  │  - POST /api/classify                                │   │
+│  │  - GET /api/heatmap-data                             │   │
+│  │  - GET /api/classifications/{id}                     │   │
+│  │  - GET /api/images/{id}                              │   │
+│  └──────────────────────────────────────────────────────┘   │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  Services:                                           │   │
+│  │  - ML Model (Classification)                         │   │
+│  │  - Image Processing (EXIF GPS)                       │   │
+│  │  - MongoDB Client (Motor)                            │   │
+│  └──────────────────────────────────────────────────────┘   │
+└──────────────────────────┬──────────────────────────────────┘
+                           │ MongoDB Connection
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│              MongoDB Atlas (Cloud Database)                  │
+│  - Stores classifications                                    │
+│  - Stores images as base64                                   │
+│  - Persistent storage                                        │
+└─────────────────────────────────────────────────────────────┘
+```
+
 ## Project Structure
 
 ```
@@ -139,6 +174,7 @@ capstone/
 ├── requirements.txt
 ├── Dockerfile               # Docker configuration for Render
 ├── run_test.py              # Standalone test script
+├── SYSTEM_DIAGRAM.md        # System architecture diagrams
 └── README.md
 ```
 
