@@ -9,6 +9,10 @@ A FastAPI backend for detecting and classifying tomato plant flowers by growth s
 - **Database Storage**: Stores all classifications with images for later retrieval
 - **Heatmap Data**: Returns all location and classification data for frontend heatmap visualization
 
+## Software Architecture
+
+The API follows a three-tier architecture deployed on the cloud. The **presentation layer** consists of RESTful endpoints built with FastAPI, handling HTTP requests and responses with automatic OpenAPI documentation. The **business logic layer** processes images by extracting GPS coordinates from EXIF metadata and running ML classification to detect and classify flowers by growth stage. The **data layer** uses MongoDB Atlas, a cloud-hosted NoSQL database that stores all classifications and images (as base64) persistently. The entire application is deployed on Render.com as a containerized service, making it scalable and accessible from anywhere. Images flow through the system: uploaded via API, processed for GPS and classification, then stored in MongoDB where they can be retrieved later for heatmap visualization or individual queries.
+
 ## Flower Stages
 
 | Stage | Name | Description |
