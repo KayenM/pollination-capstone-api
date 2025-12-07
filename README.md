@@ -29,28 +29,48 @@ The API follows a three-tier architecture deployed on the cloud. The **presentat
 pip install -r requirements.txt
 ```
 
-### 2. Run Tests
+### 2. Configure Environment
+
+The `.env` file is already configured with MongoDB credentials. If you need to update it, edit `.env`:
 
 ```bash
-# Quick standalone test (local)
-python run_test.py
+# .env file
+MONGODB_URL=mongodb+srv://username:password@cluster.mongodb.net/flower_classifications
+MONGODB_DATABASE=flower_classifications
+PORT=8000
+```
 
-# Full pytest suite (local)
+**Note:** The `.env` file is in `.gitignore` and won't be committed to git.
+
+### 3. Run Tests
+
+```bash
+# Run all integration tests (recommended)
+python test_integration.py
+
+# Run specific tests
+python test_integration.py --test model      # Test YOLO model only
+python test_integration.py --test database   # Test MongoDB only
+python test_integration.py --test e2e        # Test end-to-end flow
+python test_integration.py --test api        # Test API endpoints (requires running server)
+
+# Run original pytest suite
 pytest tests/test_api.py -v
 
 # Test live deployed API
 curl https://capstone-077z.onrender.com/
 ```
 
-### 3. Start the Server
+### 4. Start the Server
 
 ```bash
+# The .env file is automatically loaded
 uvicorn app.main:app --reload
 ```
 
 The API will be available at `http://localhost:8000`
 
-**Note:** You'll need MongoDB configured. See Database section below.
+**Note:** MongoDB URL is loaded from `.env` file.
 
 ## API Endpoints
 
@@ -168,24 +188,28 @@ capstone/
 │   ├── database_mongodb.py  # MongoDB database setup
 │   ├── config.py            # Environment variable configuration
 │   ├── models.py            # Pydantic request/response models
-│   ├── ml_model.py          # ML model interface (dummy for now)
+│   ├── ml_model.py          # YOLO model integration
 │   └── utils.py             # EXIF GPS extraction utilities
 ├── tests/
 │   ├── __init__.py
 │   └── test_api.py          # Pytest test suite
+├── ml_model.pt              # YOLOv8 trained model
 ├── requirements.txt
 ├── Dockerfile               # Docker configuration for Render
 ├── run_test.py              # Standalone test script
-├── SYSTEM_DIAGRAM.md        # System architecture diagrams
+├── test_ml_model.py         # ML model unit tests
+├── test_yolo_integration.py # Quick YOLO integration test
 └── README.md
 ```
 
 ## ML Model Integration
 
-The `app/ml_model.py` file contains a dummy implementation that will be replaced with the actual PyTorch model. The interface is:
+The `app/ml_model.py` file implements **YOLOv8 from Ultralytics** for flower detection and classification. The model is loaded from `ml_model.pt` in the root directory.
+
+### Model Interface
 
 ```python
-def classify_image(image_bytes: bytes) -> List[Dict]:
+def classify_image(image_bytes: bytes, confidence_threshold: float = 0.25) -> List[Dict]:
     """
     Returns list of detections:
     [
@@ -198,10 +222,23 @@ def classify_image(image_bytes: bytes) -> List[Dict]:
     """
 ```
 
-To integrate your actual model:
-1. Replace `load_model()` with your PyTorch model loading code
-2. Update `preprocess_image()` with your model's preprocessing
-3. Update `run_inference()` with your model's inference code
+### Features
+- **Model Caching**: Model is loaded once and cached for subsequent requests
+- **Confidence Threshold**: Adjustable threshold for filtering detections (default: 0.25)
+- **Automatic RGB Conversion**: Handles various image formats (RGBA, grayscale, etc.)
+- **GPU Support**: Automatically uses GPU if available, falls back to CPU
+
+### Testing the Model
+
+Run the integration test to verify the model works:
+```bash
+python test_yolo_integration.py
+```
+
+Or run the full test suite:
+```bash
+python test_ml_model.py
+```
 
 ## Database
 

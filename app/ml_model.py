@@ -1,20 +1,23 @@
 """
 ML Model interface for tomato plant flower detection and classification.
 
-This module contains a dummy implementation that will be replaced with the
-actual PyTorch model when ready.
+Uses YOLOv8 from ultralytics for flower detection and stage classification.
 
-Expected model interface:
-- Input: Image tensor
+Expected model output:
+- Input: Image (PIL Image or bytes)
 - Output: List of detections with bounding boxes [x_min, y_min, x_max, y_max] 
           and stage classification (0=bud, 1=anthesis, 2=post-anthesis)
 """
 
-import random
-from typing import List, Dict, Any
+import os
+from typing import List, Dict, Any, Optional
 from PIL import Image
 import io
+import logging
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Stage labels for reference
 STAGE_LABELS = {
@@ -23,130 +26,226 @@ STAGE_LABELS = {
     2: "post-anthesis"
 }
 
+# Global model cache (load once, reuse for all requests)
+_model_cache: Optional[Any] = None
 
-def load_model(model_path: str = None):
+
+def get_model_path() -> str:
+    """Get the path to the model file."""
+    # Check if model is in root directory
+    root_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "ml_model.pt")
+    if os.path.exists(root_path):
+        return root_path
+    
+    # Check if model is in app directory
+    app_path = os.path.join(os.path.dirname(__file__), "ml_model.pt")
+    if os.path.exists(app_path):
+        return app_path
+    
+    raise FileNotFoundError(
+        f"Model file not found. Checked locations:\n"
+        f"  - {root_path}\n"
+        f"  - {app_path}"
+    )
+
+
+def load_model(model_path: Optional[str] = None, force_reload: bool = False):
     """
-    Load the PyTorch model from disk.
+    Load the YOLO model from disk.
     
     Args:
-        model_path: Path to the .pt model file
+        model_path: Path to the .pt model file (default: ml_model.pt in root)
+        force_reload: Force reload even if model is cached
         
     Returns:
-        Loaded model ready for inference
-        
-    TODO: Replace with actual model loading:
-        import torch
-        model = torch.load(model_path)
-        model.eval()
-        return model
+        Loaded YOLO model ready for inference
     """
-    # Dummy implementation - returns None as placeholder
-    print(f"[DUMMY] Would load model from: {model_path}")
-    return None
+    global _model_cache
+    
+    # Return cached model if available
+    if _model_cache is not None and not force_reload:
+        logger.info("Using cached YOLO model")
+        return _model_cache
+    
+    try:
+        from ultralytics import YOLO
+    except ImportError as e:
+        raise ImportError(
+            "ultralytics package is required. Install with: pip install ultralytics"
+        ) from e
+    
+    # Get model path
+    if model_path is None:
+        model_path = get_model_path()
+    
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model file not found at: {model_path}")
+    
+    logger.info(f"Loading YOLO model from: {model_path}")
+    
+    # Load the YOLO model
+    model = YOLO(model_path)
+    
+    # Cache the model
+    _model_cache = model
+    
+    logger.info("YOLO model loaded successfully")
+    return model
 
 
-def preprocess_image(image: Image.Image) -> Any:
+def parse_yolo_results(results, confidence_threshold: float = 0.25) -> List[Dict[str, Any]]:
     """
-    Preprocess image for model inference.
+    Parse YOLO results into our API format.
     
     Args:
-        image: PIL Image object
+        results: YOLO prediction results
+        confidence_threshold: Minimum confidence to include detection
         
     Returns:
-        Preprocessed tensor ready for model input
-        
-    TODO: Replace with actual preprocessing:
-        from torchvision import transforms
-        transform = transforms.Compose([
-            transforms.Resize((640, 640)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                               std=[0.229, 0.224, 0.225])
-        ])
-        return transform(image).unsqueeze(0)
+        List of detections in API format:
+        [
+            {
+                "bounding_box": [x_min, y_min, x_max, y_max],
+                "stage": 0|1|2,
+                "confidence": 0.0-1.0
+            }
+        ]
     """
-    # Dummy implementation - just return image size for generating fake boxes
-    return image.size
-
-
-def run_inference(model: Any, preprocessed_input: Any) -> List[Dict[str, Any]]:
-    """
-    Run model inference on preprocessed input.
-    
-    Args:
-        model: Loaded PyTorch model
-        preprocessed_input: Preprocessed image tensor
-        
-    Returns:
-        List of detections, each containing:
-        - bounding_box: [x_min, y_min, x_max, y_max]
-        - stage: 0, 1, or 2
-        - confidence: float between 0 and 1
-        
-    TODO: Replace with actual inference:
-        with torch.no_grad():
-            outputs = model(preprocessed_input)
-        return parse_model_outputs(outputs)
-    """
-    # Dummy implementation - generate random flower detections
-    image_width, image_height = preprocessed_input
-    
-    # Generate 2-6 random flower detections
-    num_flowers = random.randint(2, 6)
     detections = []
     
-    for _ in range(num_flowers):
-        # Generate random bounding box within image bounds
-        box_width = random.randint(30, 100)
-        box_height = random.randint(30, 100)
+    # YOLO returns a list of Results objects (one per image)
+    # Since we process one image at a time, we get the first result
+    if not results or len(results) == 0:
+        logger.warning("No results from YOLO model")
+        return detections
+    
+    result = results[0]  # Get first result
+    
+    # Check if any boxes were detected
+    if result.boxes is None or len(result.boxes) == 0:
+        logger.info("No flowers detected in image")
+        return detections
+    
+    # Extract boxes, confidences, and classes
+    boxes = result.boxes.xyxy.cpu().numpy()  # [N, 4] - x_min, y_min, x_max, y_max
+    confidences = result.boxes.conf.cpu().numpy()  # [N] - confidence scores
+    classes = result.boxes.cls.cpu().numpy()  # [N] - class indices
+    
+    # Convert to our format
+    for box, conf, cls in zip(boxes, confidences, classes):
+        # Filter by confidence threshold
+        if conf < confidence_threshold:
+            continue
         
-        x_min = random.randint(0, max(1, image_width - box_width))
-        y_min = random.randint(0, max(1, image_height - box_height))
-        x_max = x_min + box_width
-        y_max = y_min + box_height
+        # Convert class index to stage (0, 1, 2)
+        # Assuming the model outputs class indices 0, 1, 2 for the three stages
+        stage = int(cls)
+        
+        # Validate stage is in expected range
+        if stage not in [0, 1, 2]:
+            logger.warning(f"Unexpected class index {stage}, mapping to stage 0")
+            stage = 0
         
         detection = {
-            "bounding_box": [x_min, y_min, x_max, y_max],
-            "stage": random.randint(0, 2),
-            "confidence": round(random.uniform(0.7, 0.99), 2)
+            "bounding_box": [
+                float(box[0]),  # x_min
+                float(box[1]),  # y_min
+                float(box[2]),  # x_max
+                float(box[3])   # y_max
+            ],
+            "stage": stage,
+            "confidence": float(conf)
         }
+        
         detections.append(detection)
+    
+    logger.info(f"Detected {len(detections)} flowers (filtered by conf >= {confidence_threshold})")
     
     return detections
 
 
-def classify_image(image_bytes: bytes) -> List[Dict[str, Any]]:
+def classify_image(
+    image_bytes: bytes,
+    confidence_threshold: float = 0.25,
+    model_path: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """
-    Main function to classify flowers in an image.
+    Main function to classify flowers in an image using YOLO.
     
     This is the primary interface that will be called by the API.
     
     Args:
         image_bytes: Raw image bytes
+        confidence_threshold: Minimum confidence for detections (default: 0.25)
+        model_path: Optional path to model file
         
     Returns:
         List of flower detections with bounding boxes and stage classifications
+        
+    Raises:
+        Exception: If model loading or inference fails
     """
-    # Load image
-    image = Image.open(io.BytesIO(image_bytes))
-    
-    # Convert to RGB if necessary (handles RGBA, grayscale, etc.)
-    if image.mode != "RGB":
-        image = image.convert("RGB")
-    
-    # Load model (in production, this should be cached/singleton)
-    model = load_model()
-    
-    # Preprocess
-    preprocessed = preprocess_image(image)
-    
-    # Run inference
-    detections = run_inference(model, preprocessed)
-    
-    return detections
+    try:
+        # Load image
+        image = Image.open(io.BytesIO(image_bytes))
+        
+        # Convert to RGB if necessary (handles RGBA, grayscale, etc.)
+        if image.mode != "RGB":
+            logger.info(f"Converting image from {image.mode} to RGB")
+            image = image.convert("RGB")
+        
+        # Load model (uses cached model if available)
+        model = load_model(model_path)
+        
+        # Run inference
+        # Note: YOLO's predict() can handle PIL Images directly
+        logger.info(f"Running inference on image of size {image.size}")
+        results = model.predict(
+            source=image,
+            conf=confidence_threshold,
+            verbose=False  # Suppress YOLO's verbose output
+        )
+        
+        # Parse results to our format
+        detections = parse_yolo_results(results, confidence_threshold)
+        
+        return detections
+        
+    except Exception as e:
+        logger.error(f"Error in classify_image: {str(e)}")
+        raise
 
 
 def get_stage_label(stage: int) -> str:
     """Get human-readable label for a stage number."""
     return STAGE_LABELS.get(stage, "unknown")
 
+
+def get_model_info() -> Dict[str, Any]:
+    """
+    Get information about the loaded model.
+    
+    Returns:
+        Dictionary with model information
+    """
+    try:
+        model = load_model()
+        
+        info = {
+            "model_type": "YOLOv8",
+            "library": "ultralytics",
+            "loaded": _model_cache is not None,
+            "stages": STAGE_LABELS,
+        }
+        
+        # Try to get model names if available
+        if hasattr(model, 'names'):
+            info["class_names"] = model.names
+        
+        return info
+        
+    except Exception as e:
+        return {
+            "error": str(e),
+            "loaded": False
+        }
