@@ -1,8 +1,8 @@
 ---
 title: Capstone Backend
 emoji: 📚
-colorFrom: green
-colorTo: yellow
+colorFrom: gray
+colorTo: gray
 sdk: docker
 pinned: false
 ---
