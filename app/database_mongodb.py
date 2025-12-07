@@ -102,18 +102,21 @@ class ClassificationRecord:
         flowers: List[Dict[str, Any]],
         filename: str = "image.jpg"
     ) -> Dict[str, Any]:
-        """Create a new classification record in MongoDB."""
+        """Create a new classification record in MongoDB.
+        
+        Note: Only stores the annotated image (with bounding boxes), not the original.
+        """
         db = get_database()
         collection = db["classifications"]
         
-        # Encode image to base64
+        # Encode annotated image to base64
         image_base64 = ClassificationRecord.encode_image(image_bytes)
         
         document = {
             "id": record_id,
             "image_base64": image_base64,
             "image_filename": filename,
-            "image_content_type": "image/jpeg",  # Could be detected from file
+            "image_content_type": "image/jpeg",
             "latitude": latitude,
             "longitude": longitude,
             "timestamp": datetime.utcnow(),

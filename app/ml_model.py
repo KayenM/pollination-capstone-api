@@ -221,6 +221,83 @@ def classify_image(
         raise
 
 
+def generate_annotated_image(
+    image_bytes: bytes,
+    confidence_threshold: float = 0.25,
+    model_path: Optional[str] = None
+) -> bytes:
+    """
+    Generate an annotated image with bounding boxes and labels.
+    
+    Uses YOLO's built-in plotting functionality to draw boxes and labels.
+    
+    Args:
+        image_bytes: Raw image bytes
+        confidence_threshold: Minimum confidence for detections
+        model_path: Optional path to model file
+        
+    Returns:
+        Annotated image as bytes (JPEG format)
+        
+    Raises:
+        Exception: If model loading or inference fails
+    """
+    try:
+        # Load image
+        image = Image.open(io.BytesIO(image_bytes))
+        
+        # Convert to RGB if necessary
+        if image.mode != "RGB":
+            logger.info(f"Converting image from {image.mode} to RGB")
+            image = image.convert("RGB")
+        
+        # Load model (uses cached model if available)
+        model = load_model(model_path)
+        
+        # Run inference
+        logger.info(f"Running inference for annotated image, size {image.size}")
+        results = model.predict(
+            source=image,
+            conf=confidence_threshold,
+            verbose=False
+        )
+        
+        # Use YOLO's built-in plot() method to generate annotated image
+        # This draws bounding boxes, labels, and confidence scores
+        if results and len(results) > 0:
+            result = results[0]
+            
+            # Plot the results on the image
+            # The plot() method returns a numpy array with the annotated image
+            annotated_array = result.plot(
+                conf=True,  # Show confidence scores
+                labels=True,  # Show class labels
+                boxes=True,  # Show bounding boxes
+                line_width=2,  # Box line width
+            )
+            
+            # Convert numpy array back to PIL Image
+            annotated_image = Image.fromarray(annotated_array)
+            
+            # Convert to bytes
+            output_buffer = io.BytesIO()
+            annotated_image.save(output_buffer, format='JPEG', quality=95)
+            annotated_bytes = output_buffer.getvalue()
+            
+            logger.info(f"Generated annotated image with {len(result.boxes) if result.boxes else 0} detections")
+            return annotated_bytes
+        else:
+            # No detections, return original image
+            logger.info("No detections found, returning original image")
+            output_buffer = io.BytesIO()
+            image.save(output_buffer, format='JPEG', quality=95)
+            return output_buffer.getvalue()
+        
+    except Exception as e:
+        logger.error(f"Error in generate_annotated_image: {str(e)}")
+        raise
+
+
 def get_stage_label(stage: int) -> str:
     """Get human-readable label for a stage number."""
     return STAGE_LABELS.get(stage, "unknown")

@@ -5,8 +5,9 @@ A FastAPI backend for detecting and classifying tomato plant flowers by growth s
 ## Features
 
 - **Image Classification**: Upload images of tomato plants to detect flowers and classify their growth stage
+- **Annotated Images**: Automatically generates and stores images with bounding boxes and labels drawn on them
 - **GPS Extraction**: Automatically extracts location from image EXIF metadata
-- **Database Storage**: Stores all classifications with images for later retrieval
+- **Database Storage**: Stores all classifications with annotated images for later retrieval
 - **Heatmap Data**: Returns all location and classification data for frontend heatmap visualization
 
 ## Software Architecture
@@ -129,7 +130,14 @@ Get all classification data for heatmap visualization.
 Get a specific classification by ID.
 
 ### `GET /api/images/{id}`
-Get the original image for a classification.
+Get the annotated image for a classification.
+
+**Response:** JPEG image with:
+- Bounding boxes around each detected flower
+- Stage labels (Bud, Anthesis, Post-Anthesis)
+- Confidence scores
+
+**Note:** Only annotated images are stored to save database space.
 
 ### `DELETE /api/classifications/{id}`
 Delete a classification and its image.

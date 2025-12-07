@@ -34,7 +34,7 @@ from .models import (
     Location,
     HealthResponse,
 )
-from .ml_model import classify_image
+from .ml_model import classify_image, generate_annotated_image
 from .utils import extract_gps_coordinates
 from .config import settings
 
@@ -145,17 +145,27 @@ async def classify_flower_image(
             detail=f"Error running classification model: {str(e)}",
         )
 
+    # Generate annotated image with bounding boxes
+    # This is what we'll store (not the original image)
+    try:
+        annotated_image_bytes = generate_annotated_image(image_bytes)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generating annotated image: {str(e)}",
+        )
+
     # Calculate stage summary
     stage_summary = {0: 0, 1: 0, 2: 0}
     for detection in detections:
         stage = detection["stage"]
         stage_summary[stage] = stage_summary.get(stage, 0) + 1
 
-    # Save to MongoDB (image stored as base64)
+    # Save to MongoDB (only annotated image is stored)
     try:
         await ClassificationRecord.create(
             record_id=record_id,
-            image_bytes=image_bytes,
+            image_bytes=annotated_image_bytes,  # Store annotated image only
             latitude=latitude,
             longitude=longitude,
             flowers=detections,
@@ -297,7 +307,10 @@ async def get_classification(record_id: str):
 @app.get("/api/images/{record_id}")
 async def get_image(record_id: str):
     """
-    Get the original image for a classification from MongoDB.
+    Get the annotated image (with bounding boxes and labels) for a classification.
+    
+    Note: Only annotated images are stored. The image includes bounding boxes,
+    stage labels, and confidence scores drawn on it.
     """
     try:
         record = await ClassificationRecord.get_by_id(record_id)
