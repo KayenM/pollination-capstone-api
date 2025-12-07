@@ -65,15 +65,13 @@ def test_yolo_model():
     print_header("TEST 1: YOLO Model Integration")
     
     try:
-        # Check if model file exists
-        print_section("1.1 Checking Model File")
-        if not os.path.exists("ml_model.pt"):
-            print_error("ml_model.pt not found!")
-            return False
-        print_success("Model file found: ml_model.pt")
+        # Test model loading from Hugging Face
+        print_section("1.1 Downloading Model from Hugging Face")
+        print("  This will download the latest model from:")
+        print("  deenp03/tomato_pollination_stage_classifier")
         
         # Test model loading
-        print_section("1.2 Loading YOLO Model")
+        print_section("1.2 Loading YOLO Model from Hugging Face")
         from app.ml_model import load_model, get_model_info, classify_image
         
         model = load_model()

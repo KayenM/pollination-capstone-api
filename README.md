@@ -204,7 +204,7 @@ capstone/
 
 ## ML Model Integration
 
-The `app/ml_model.py` file implements **YOLOv8 from Ultralytics** for flower detection and classification. The model is loaded from `ml_model.pt` in the root directory.
+The `app/ml_model.py` file implements **YOLOv8 from Ultralytics** for flower detection and classification. The model is **automatically downloaded from Hugging Face Hub** to ensure you always have the latest version.
 
 ### Model Interface
 
@@ -223,22 +223,27 @@ def classify_image(image_bytes: bytes, confidence_threshold: float = 0.25) -> Li
 ```
 
 ### Features
+- **Hugging Face Integration**: Automatically downloads latest model from `deenp03/tomato_pollination_stage_classifier`
 - **Model Caching**: Model is loaded once and cached for subsequent requests
+- **Automatic Updates**: Always uses the latest model version from Hugging Face
+- **Fallback Support**: Falls back to local model if Hugging Face is unavailable
 - **Confidence Threshold**: Adjustable threshold for filtering detections (default: 0.25)
 - **Automatic RGB Conversion**: Handles various image formats (RGBA, grayscale, etc.)
 - **GPU Support**: Automatically uses GPU if available, falls back to CPU
 
 ### Testing the Model
 
-Run the integration test to verify the model works:
+Run the integration test to verify the model downloads and works:
 ```bash
-python test_yolo_integration.py
+# Test all components including Hugging Face download
+python test_integration.py
+
+# Or test just the model
+python test_integration.py --test model
 ```
 
-Or run the full test suite:
-```bash
-python test_ml_model.py
-```
+The first run will download the model from Hugging Face (~50MB, takes 5-10 seconds).
+Subsequent runs use the cached model and are much faster.
 
 ## Database
 

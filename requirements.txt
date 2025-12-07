@@ -15,6 +15,7 @@ piexif==1.1.3
 torch>=2.6.0
 torchvision>=0.21.0
 ultralytics>=8.0.200  # YOLO model for flower detection
+huggingface_hub>=0.20.0  # Download models from Hugging Face
 
 # Testing
 pytest==7.4.3

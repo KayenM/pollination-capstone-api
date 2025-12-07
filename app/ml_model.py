@@ -29,32 +29,19 @@ STAGE_LABELS = {
 # Global model cache (load once, reuse for all requests)
 _model_cache: Optional[Any] = None
 
-
-def get_model_path() -> str:
-    """Get the path to the model file."""
-    # Check if model is in root directory
-    root_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "ml_model.pt")
-    if os.path.exists(root_path):
-        return root_path
-    
-    # Check if model is in app directory
-    app_path = os.path.join(os.path.dirname(__file__), "ml_model.pt")
-    if os.path.exists(app_path):
-        return app_path
-    
-    raise FileNotFoundError(
-        f"Model file not found. Checked locations:\n"
-        f"  - {root_path}\n"
-        f"  - {app_path}"
-    )
+# Hugging Face model configuration
+HF_REPO_ID = "deenp03/tomato_pollination_stage_classifier"
+HF_MODEL_FILENAME = "best.pt"
 
 
 def load_model(model_path: Optional[str] = None, force_reload: bool = False):
     """
-    Load the YOLO model from disk.
+    Load the YOLO model from Hugging Face Hub.
+    
+    Always fetches the latest model from Hugging Face to ensure up-to-date predictions.
     
     Args:
-        model_path: Path to the .pt model file (default: ml_model.pt in root)
+        model_path: Optional local path to model file (if None, downloads from HF)
         force_reload: Force reload even if model is cached
         
     Returns:
@@ -69,14 +56,32 @@ def load_model(model_path: Optional[str] = None, force_reload: bool = False):
     
     try:
         from ultralytics import YOLO
+        from huggingface_hub import hf_hub_download
     except ImportError as e:
         raise ImportError(
-            "ultralytics package is required. Install with: pip install ultralytics"
+            "Required packages not installed. Install with: pip install ultralytics huggingface_hub"
         ) from e
     
-    # Get model path
+    # Download model from Hugging Face if no local path provided
     if model_path is None:
-        model_path = get_model_path()
+        logger.info(f"Downloading latest model from Hugging Face: {HF_REPO_ID}/{HF_MODEL_FILENAME}")
+        try:
+            model_path = hf_hub_download(
+                repo_id=HF_REPO_ID,
+                filename=HF_MODEL_FILENAME
+            )
+            logger.info(f"Model downloaded to: {model_path}")
+        except Exception as e:
+            logger.error(f"Failed to download model from Hugging Face: {e}")
+            # Fallback to local model if available
+            local_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "ml_model.pt")
+            if os.path.exists(local_path):
+                logger.warning(f"Falling back to local model: {local_path}")
+                model_path = local_path
+            else:
+                raise RuntimeError(
+                    f"Failed to download model from Hugging Face and no local fallback found"
+                ) from e
     
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model file not found at: {model_path}")
@@ -234,6 +239,8 @@ def get_model_info() -> Dict[str, Any]:
         info = {
             "model_type": "YOLOv8",
             "library": "ultralytics",
+            "source": "Hugging Face Hub",
+            "repo_id": HF_REPO_ID,
             "loaded": _model_cache is not None,
             "stages": STAGE_LABELS,
         }
