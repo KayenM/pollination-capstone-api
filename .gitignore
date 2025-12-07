@@ -75,3 +75,5 @@ Thumbs.db
 *.tmp
 *.bak
 
+ml_model.pt
+*.jpeg
