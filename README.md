@@ -7,11 +7,11 @@ sdk: docker
 pinned: false
 ---
 
+Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
+
 # Tomato Plant Flower Classification API
 
 A FastAPI backend for detecting and classifying tomato plant flowers by growth stage using ML.
-
-Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
 
 ## Features
 
