@@ -5,7 +5,7 @@ Uses Motor (async MongoDB driver) for FastAPI integration.
 
 import os
 import base64
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import ConnectionFailure
@@ -90,6 +90,12 @@ async def create_indexes():
     await video_collection.create_index("id", unique=True)
     await video_collection.create_index("timestamp")
     await video_collection.create_index([("latitude", 1), ("longitude", 1)])
+    
+    # Job tracking collection
+    jobs_collection = db["jobs"]
+    await jobs_collection.create_index("job_id", unique=True)
+    await jobs_collection.create_index("status")
+    await jobs_collection.create_index("created_at")
     
     logger.info("MongoDB indexes created successfully")
 
@@ -340,4 +346,114 @@ class VideoClassificationRecord:
         db = get_database()
         collection = db["video_classifications"]
         return await collection.count_documents({})
+
+
+class JobRecord:
+    """
+    MongoDB document model for async job tracking.
+    """
+    
+    @staticmethod
+    async def create(
+        job_id: str,
+        job_type: str,
+        status: str = "queued",
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Create a new job record."""
+        db = get_database()
+        collection = db["jobs"]
+        
+        document = {
+            "job_id": job_id,
+            "job_type": job_type,
+            "status": status,
+            "progress": 0,
+            "message": None,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+            "completed_at": None,
+            "metadata": metadata or {},
+            "result": None,
+            "error": None,
+        }
+        
+        await collection.insert_one(document)
+        logger.info(f"Job record created: {job_id}")
+        return document
+    
+    @staticmethod
+    async def update_status(
+        job_id: str,
+        status: str,
+        progress: Optional[int] = None,
+        message: Optional[str] = None,
+        result: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None
+    ) -> bool:
+        """Update job status."""
+        db = get_database()
+        collection = db["jobs"]
+        
+        update_data = {
+            "status": status,
+            "updated_at": datetime.utcnow(),
+        }
+        
+        if progress is not None:
+            update_data["progress"] = progress
+        if message is not None:
+            update_data["message"] = message
+        if result is not None:
+            update_data["result"] = result
+        if error is not None:
+            update_data["error"] = error
+        
+        if status in ["completed", "failed"]:
+            update_data["completed_at"] = datetime.utcnow()
+        
+        result = await collection.update_one(
+            {"job_id": job_id},
+            {"$set": update_data}
+        )
+        
+        return result.modified_count > 0
+    
+    @staticmethod
+    async def get_by_id(job_id: str) -> Optional[Dict[str, Any]]:
+        """Get job record by ID."""
+        db = get_database()
+        collection = db["jobs"]
+        return await collection.find_one({"job_id": job_id})
+    
+    @staticmethod
+    async def get_active_jobs() -> List[Dict[str, Any]]:
+        """Get all active (not completed/failed) jobs."""
+        db = get_database()
+        collection = db["jobs"]
+        cursor = collection.find({
+            "status": {"$in": ["queued", "processing"]}
+        }).sort("created_at", -1)
+        return await cursor.to_list(length=None)
+    
+    @staticmethod
+    async def delete_by_id(job_id: str) -> bool:
+        """Delete job record by ID."""
+        db = get_database()
+        collection = db["jobs"]
+        result = await collection.delete_one({"job_id": job_id})
+        return result.deleted_count > 0
+    
+    @staticmethod
+    async def cleanup_old_jobs(days: int = 7) -> int:
+        """Delete job records older than specified days."""
+        db = get_database()
+        collection = db["jobs"]
+        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        result = await collection.delete_many({
+            "created_at": {"$lt": cutoff_date},
+            "status": {"$in": ["completed", "failed"]}
+        })
+        logger.info(f"Cleaned up {result.deleted_count} old job records")
+        return result.deleted_count
 

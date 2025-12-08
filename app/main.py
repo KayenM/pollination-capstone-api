@@ -14,6 +14,8 @@ import json
 import uuid
 from datetime import datetime
 from typing import Optional
+from concurrent.futures import ProcessPoolExecutor
+import asyncio
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.responses import Response, RedirectResponse
@@ -25,6 +27,7 @@ from .database_mongodb import (
     create_indexes,
     ClassificationRecord,
     VideoClassificationRecord,
+    JobRecord,
     get_database,
 )
 from .models import (
@@ -36,6 +39,7 @@ from .models import (
     HealthResponse,
     VideoClassificationResponse,
     FrameStatistics,
+    JobStatusResponse,
 )
 from .ml_model import (
     classify_image,
@@ -48,6 +52,10 @@ from .config import settings
 
 # Ensure upload directory exists (for temporary processing only)
 settings.ensure_upload_dir()
+
+# Initialize ProcessPoolExecutor for async video processing
+# Use max 4 workers to avoid overwhelming the system (suitable for HF Spaces)
+executor = ProcessPoolExecutor(max_workers=int(os.getenv("MAX_WORKERS", "4")))
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -79,8 +87,9 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Close MongoDB connection on shutdown."""
+    """Close MongoDB connection and executor on shutdown."""
     await close_mongodb_connection()
+    executor.shutdown(wait=True)
 
 @app.get("/")
 async def root():
@@ -684,6 +693,219 @@ async def delete_video_classification(record_id: str):
         raise HTTPException(status_code=404, detail="Video classification not found")
 
     return {"message": "Video classification deleted successfully", "id": record_id}
+
+
+# ============================================================================
+# ASYNC VIDEO CLASSIFICATION ENDPOINTS (ProcessPoolExecutor)
+# ============================================================================
+
+@app.post("/api/classify-video-async", response_model=JobStatusResponse)
+async def classify_video_async(
+    file: UploadFile = File(..., description="Video file of tomato plant"),
+    latitude: Optional[float] = Form(None, description="Manual latitude override"),
+    longitude: Optional[float] = Form(None, description="Manual longitude override"),
+):
+    """
+    Upload a video for ASYNC processing (non-blocking).
+    
+    This endpoint returns immediately with a job_id. The video is processed
+    in the background using ProcessPoolExecutor. Use the job_id to check
+    processing status via GET /api/jobs/{job_id}.
+    
+    Benefits over synchronous endpoint:
+    - API remains responsive during processing
+    - Multiple videos can be processed concurrently (up to 4 workers)
+    - Suitable for long videos or high traffic
+    - Progress tracking available
+    
+    Returns:
+        JobStatusResponse with job_id and status endpoint
+    """
+    # Validate file type
+    if not file.content_type or not file.content_type.startswith("video/"):
+        raise HTTPException(
+            status_code=400,
+            detail="File must be a video (MP4, AVI, MOV, etc.)",
+        )
+
+    # Read video contents
+    video_bytes = await file.read()
+    
+    # Generate unique job ID
+    job_id = str(uuid.uuid4())
+    temp_dir = "/tmp"
+    temp_video_path = os.path.join(temp_dir, f"{job_id}_input.mp4")
+    temp_output_path = os.path.join(temp_dir, f"{job_id}_output.mp4")
+
+    # Save uploaded video to temporary file
+    with open(temp_video_path, 'wb') as f:
+        f.write(video_bytes)
+
+    # Create job record in database
+    try:
+        await JobRecord.create(
+            job_id=job_id,
+            job_type="video_classification",
+            status="queued",
+            metadata={
+                "filename": file.filename,
+                "latitude": latitude,
+                "longitude": longitude,
+                "file_size": len(video_bytes),
+            }
+        )
+    except Exception as e:
+        # Clean up temp file if job creation fails
+        if os.path.exists(temp_video_path):
+            os.remove(temp_video_path)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error creating job record: {str(e)}",
+        )
+
+    # Submit job to ProcessPoolExecutor
+    try:
+        from .video_worker import process_video_sync
+        
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(
+            executor,
+            process_video_sync,
+            job_id,
+            temp_video_path,
+            temp_output_path,
+            latitude,
+            longitude,
+            file.filename or "video.mp4",
+            settings.MONGODB_URL,
+            settings.MONGODB_DATABASE,
+        )
+    except Exception as e:
+        # Clean up on error
+        await JobRecord.update_status(
+            job_id,
+            status="failed",
+            message=f"Error submitting job: {str(e)}"
+        )
+        if os.path.exists(temp_video_path):
+            os.remove(temp_video_path)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error submitting processing job: {str(e)}",
+        )
+
+    # Return job status immediately
+    job = await JobRecord.get_by_id(job_id)
+    
+    return JobStatusResponse(
+        job_id=job_id,
+        status="queued",
+        progress=0,
+        message="Video queued for processing. Check status endpoint for progress.",
+        created_at=job["created_at"],
+        estimated_time_remaining=60,  # Rough estimate: 30-60 seconds
+    )
+
+
+@app.get("/api/jobs/{job_id}", response_model=JobStatusResponse)
+async def get_job_status(job_id: str):
+    """
+    Get the status of an async video processing job.
+    
+    Poll this endpoint to check if your video has been processed.
+    Once status is 'completed', use the result.video_path to access
+    the annotated video.
+    
+    Status values:
+    - queued: Job is waiting to be processed
+    - processing: Video is being analyzed (check progress field)
+    - completed: Processing finished (result field contains data)
+    - failed: Processing failed (message field contains error)
+    
+    Returns:
+        JobStatusResponse with current status and results if completed
+    """
+    try:
+        job = await JobRecord.get_by_id(job_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving job status: {str(e)}",
+        )
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Calculate estimated time remaining
+    estimated_time = None
+    if job["status"] == "processing":
+        # Rough estimate based on progress
+        progress = job.get("progress", 0)
+        if progress > 0:
+            elapsed = (datetime.utcnow() - job["created_at"]).total_seconds()
+            estimated_total = elapsed / (progress / 100)
+            estimated_time = int(estimated_total - elapsed)
+
+    return JobStatusResponse(
+        job_id=job["job_id"],
+        status=job["status"],
+        progress=job.get("progress", 0),
+        message=job.get("message"),
+        created_at=job["created_at"],
+        completed_at=job.get("completed_at"),
+        result=job.get("result"),
+        estimated_time_remaining=estimated_time,
+    )
+
+
+@app.get("/api/jobs", response_model=list)
+async def list_active_jobs():
+    """
+    List all active (queued or processing) jobs.
+    
+    Useful for monitoring the processing queue.
+    """
+    try:
+        jobs = await JobRecord.get_active_jobs()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving jobs: {str(e)}",
+        )
+
+    return [
+        {
+            "job_id": job["job_id"],
+            "status": job["status"],
+            "progress": job.get("progress", 0),
+            "created_at": job["created_at"],
+            "message": job.get("message"),
+        }
+        for job in jobs
+    ]
+
+
+@app.delete("/api/jobs/{job_id}")
+async def cancel_job(job_id: str):
+    """
+    Cancel/delete a job record.
+    
+    Note: This only removes the job record from the database.
+    If the job is already processing in a worker, it will continue
+    until completion (the result just won't be saved).
+    """
+    try:
+        deleted = await JobRecord.delete_by_id(job_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error deleting job: {str(e)}",
+        )
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return {"message": "Job deleted successfully", "job_id": job_id}
 
 
 if __name__ == "__main__":

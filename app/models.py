@@ -87,6 +87,18 @@ class HealthResponse(BaseModel):
     timestamp: datetime
 
 
+class JobStatusResponse(BaseModel):
+    """Response for async job status."""
+    job_id: str
+    status: str = Field(..., description="Job status: queued, processing, completed, failed")
+    progress: Optional[int] = Field(None, ge=0, le=100, description="Processing progress percentage")
+    message: Optional[str] = Field(None, description="Status message or error details")
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+    result: Optional[dict] = Field(None, description="Classification result when completed")
+    estimated_time_remaining: Optional[int] = Field(None, description="Estimated seconds remaining")
+
+
 class FrameStatistics(BaseModel):
     """Statistics for a single video frame."""
     frame_number: int = Field(..., description="Frame number (0-indexed)")
