@@ -10,7 +10,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1
 
 # Update package lists and install system dependencies
-# Using separate RUN commands for better error tracking
+# Including OpenCV video processing dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         libgomp1 \

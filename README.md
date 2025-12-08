@@ -16,10 +16,12 @@ Check out the configuration reference at https://huggingface.co/docs/hub/spaces-
 ## Features
 
 - **Image Classification**: Upload images of tomato plants to detect flowers and classify their growth stage
-- **Annotated Images**: Automatically generates and stores images with bounding boxes and labels drawn on them
+- **Video Classification**: Process entire videos frame-by-frame for comprehensive flower analysis ⭐ NEW
+- **Annotated Media**: Automatically generates and stores images/videos with bounding boxes and labels
 - **GPS Extraction**: Automatically extracts location from image EXIF metadata
-- **Database Storage**: Stores all classifications with annotated images for later retrieval
+- **Database Storage**: Stores all classifications with annotated media for later retrieval (GridFS for large videos)
 - **Heatmap Data**: Returns all location and classification data for frontend heatmap visualization
+- **Frame-by-Frame Analysis**: Detailed statistics for each video frame with aggregated summaries
 
 ## Software Architecture
 
@@ -69,6 +71,9 @@ python test_integration.py --test api        # Test API endpoints (requires runn
 # Run original pytest suite
 pytest tests/test_api.py -v
 
+# Test video classification (NEW)
+python test_video_api.py
+
 # Test live deployed API
 curl https://capstone-077z.onrender.com/
 ```
@@ -86,7 +91,9 @@ The API will be available at `http://localhost:8000`
 
 ## API Endpoints
 
-### `POST /api/classify`
+### Image Classification
+
+#### `POST /api/classify`
 Upload an image for flower classification.
 
 **Request:**
@@ -150,8 +157,52 @@ Get the annotated image for a classification.
 
 **Note:** Only annotated images are stored to save database space.
 
-### `DELETE /api/classifications/{id}`
+#### `DELETE /api/classifications/{id}`
 Delete a classification and its image.
+
+### Video Classification ⭐ NEW
+
+#### `POST /api/classify-video`
+Upload a video for frame-by-frame flower classification.
+
+**Request:**
+- `file`: Video file (MP4, AVI, MOV, etc.)
+- `latitude` (optional): Manual GPS latitude
+- `longitude` (optional): Manual GPS longitude  
+- `include_frame_details` (optional): Include per-frame statistics (default: false)
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "video_path": "/api/videos/uuid",
+  "location": {"latitude": 37.7749, "longitude": -122.4194},
+  "timestamp": "2025-12-08T10:30:00Z",
+  "total_frames": 300,
+  "fps": 30.0,
+  "duration_seconds": 10.0,
+  "total_detections": 450,
+  "average_flowers_per_frame": 1.5,
+  "stage_summary": {"0": 150, "1": 200, "2": 100},
+  "frame_statistics": null
+}
+```
+
+#### `GET /api/videos/{id}`
+Download the annotated video with bounding boxes and labels on each frame.
+
+#### `GET /api/video-classifications/{id}`
+Get video classification metadata and statistics.
+
+#### `GET /api/video-classifications`
+List all video classifications.
+
+#### `DELETE /api/video-classifications/{id}`
+Delete a video classification and its associated video.
+
+**📖 For detailed video API documentation, see [VIDEO_API_GUIDE.md](VIDEO_API_GUIDE.md)**
+
+**🧪 Test video endpoints with:** `python test_video_api.py`
 
 ## API Documentation
 
@@ -203,11 +254,11 @@ For local development:
 capstone/
 ├── app/
 │   ├── __init__.py
-│   ├── main.py              # FastAPI application and routes
-│   ├── database_mongodb.py  # MongoDB database setup
+│   ├── main.py              # FastAPI application and routes (images + videos)
+│   ├── database_mongodb.py  # MongoDB + GridFS setup
 │   ├── config.py            # Environment variable configuration
 │   ├── models.py            # Pydantic request/response models
-│   ├── ml_model.py          # YOLO model integration
+│   ├── ml_model.py          # YOLO model integration (images + videos)
 │   └── utils.py             # EXIF GPS extraction utilities
 ├── tests/
 │   ├── __init__.py
@@ -215,9 +266,9 @@ capstone/
 ├── ml_model.pt              # YOLOv8 trained model
 ├── requirements.txt
 ├── Dockerfile               # Docker configuration for Render
-├── run_test.py              # Standalone test script
-├── test_ml_model.py         # ML model unit tests
-├── test_yolo_integration.py # Quick YOLO integration test
+├── test_integration.py      # Integration tests
+├── test_video_api.py        # Video API test suite (NEW)
+├── VIDEO_API_GUIDE.md       # Video classification documentation (NEW)
 └── README.md
 ```
 

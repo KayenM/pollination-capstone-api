@@ -337,3 +337,189 @@ def get_model_info() -> Dict[str, Any]:
             "error": str(e),
             "loaded": False
         }
+
+
+def classify_video(
+    video_path: str,
+    confidence_threshold: float = 0.25,
+    model_path: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Classify flowers in a video using YOLO.
+    
+    Processes video frame by frame and returns detections for each frame.
+    
+    Args:
+        video_path: Path to video file
+        confidence_threshold: Minimum confidence for detections (default: 0.25)
+        model_path: Optional path to model file
+        
+    Returns:
+        Dictionary containing:
+        - frame_results: List of detection lists (one per frame)
+        - total_frames: Total number of frames processed
+        - fps: Frames per second
+        - duration: Video duration in seconds
+        
+    Raises:
+        Exception: If model loading or video processing fails
+    """
+    try:
+        import cv2
+        
+        # Load model (uses cached model if available)
+        model = load_model(model_path)
+        
+        # Get video metadata first
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise ValueError(f"Could not open video file: {video_path}")
+        
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = total_frames / fps if fps > 0 else 0
+        cap.release()
+        
+        logger.info(f"Processing video: {total_frames} frames at {fps:.2f} fps ({duration:.2f}s)")
+        
+        # Run inference on video
+        # stream=True processes frame by frame instead of loading all at once
+        results = model.predict(
+            source=video_path,
+            conf=confidence_threshold,
+            save=False,  # Don't save automatically
+            verbose=False,
+            stream=True  # Process frame by frame to save memory
+        )
+        
+        # Collect detections for each frame
+        frame_results = []
+        frame_count = 0
+        
+        for result in results:
+            detections = parse_yolo_results([result], confidence_threshold)
+            frame_results.append(detections)
+            frame_count += 1
+            
+            # Log progress every 30 frames
+            if frame_count % 30 == 0:
+                logger.info(f"Processed {frame_count}/{total_frames} frames...")
+        
+        logger.info(f"Video processing complete: {frame_count} frames processed")
+        
+        return {
+            'frame_results': frame_results,
+            'total_frames': frame_count,
+            'fps': fps,
+            'duration': duration
+        }
+        
+    except ImportError as e:
+        raise ImportError(
+            "OpenCV not installed. Install with: pip install opencv-python-headless"
+        ) from e
+    except Exception as e:
+        logger.error(f"Error in classify_video: {str(e)}")
+        raise
+
+
+def generate_annotated_video(
+    video_path: str,
+    output_path: str,
+    confidence_threshold: float = 0.25,
+    model_path: Optional[str] = None
+) -> str:
+    """
+    Generate an annotated video with bounding boxes and labels.
+    
+    Uses YOLO's built-in functionality to draw boxes and labels on each frame.
+    
+    Args:
+        video_path: Path to input video file
+        output_path: Path where annotated video should be saved
+        confidence_threshold: Minimum confidence for detections
+        model_path: Optional path to model file
+        
+    Returns:
+        Path to the saved annotated video file
+        
+    Raises:
+        Exception: If model loading or video processing fails
+    """
+    try:
+        import cv2
+        
+        # Load model (uses cached model if available)
+        model = load_model(model_path)
+        
+        logger.info(f"Generating annotated video from {video_path}")
+        
+        # Open input video
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise ValueError(f"Could not open video file: {video_path}")
+        
+        # Get video properties
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        # Create video writer
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        
+        if not out.isOpened():
+            raise ValueError(f"Could not create output video file: {output_path}")
+        
+        # Process video frame by frame
+        frame_count = 0
+        
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            
+            # Run inference on this frame
+            results = model.predict(
+                source=frame,
+                conf=confidence_threshold,
+                verbose=False
+            )
+            
+            # Annotate frame
+            if results and len(results) > 0:
+                result = results[0]
+                # Use YOLO's plot() method to draw annotations
+                annotated_frame = result.plot(
+                    conf=True,  # Show confidence scores
+                    labels=True,  # Show class labels
+                    boxes=True,  # Show bounding boxes
+                    line_width=2,  # Box line width
+                )
+            else:
+                annotated_frame = frame
+            
+            # Write annotated frame
+            out.write(annotated_frame)
+            frame_count += 1
+            
+            # Log progress every 30 frames
+            if frame_count % 30 == 0:
+                logger.info(f"Annotated {frame_count}/{total_frames} frames...")
+        
+        # Release resources
+        cap.release()
+        out.release()
+        
+        logger.info(f"Annotated video saved to {output_path} ({frame_count} frames)")
+        
+        return output_path
+        
+    except ImportError as e:
+        raise ImportError(
+            "OpenCV not installed. Install with: pip install opencv-python-headless"
+        ) from e
+    except Exception as e:
+        logger.error(f"Error in generate_annotated_video: {str(e)}")
+        raise
