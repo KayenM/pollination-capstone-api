@@ -717,7 +717,7 @@ async def classify_short_video_demo(
     await file.read()
 
     # Simulate processing delay for demo purposes
-    await asyncio.sleep(5)
+    await asyncio.sleep(12)
 
     try:
         records = await VideoClassificationRecord.get_all()
