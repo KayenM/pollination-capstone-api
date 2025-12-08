@@ -696,6 +696,65 @@ async def delete_video_classification(record_id: str):
 
 
 # ============================================================================
+# SHORT VIDEO DEMO ENDPOINT
+# ============================================================================
+
+@app.post("/api/classify/short-video")
+async def classify_short_video_demo(
+    file: UploadFile = File(..., description="Short video file for demo"),
+):
+    """
+    Demo endpoint that simulates processing by sleeping and then returns
+    the first annotated video currently stored.
+    """
+    if not file.content_type or not file.content_type.startswith("video/"):
+        raise HTTPException(
+            status_code=400,
+            detail="File must be a video (MP4, AVI, MOV, etc.)",
+        )
+
+    # Read and discard the uploaded video to fully receive the payload
+    await file.read()
+
+    # Simulate processing delay for demo purposes
+    await asyncio.sleep(9)
+
+    try:
+        records = await VideoClassificationRecord.get_all()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving stored videos: {str(e)}",
+        )
+
+    if not records:
+        raise HTTPException(
+            status_code=404,
+            detail="No annotated videos are available yet.",
+        )
+
+    # get_all is sorted by timestamp desc; return the first (most recent) video
+    first_record = records[0]
+    record_id = first_record["id"]
+
+    video_bytes = await VideoClassificationRecord.get_video_bytes(record_id)
+    if not video_bytes:
+        raise HTTPException(status_code=404, detail="Annotated video not found")
+
+    filename = first_record.get("video_filename", "video.mp4")
+    media_type = first_record.get("video_content_type", "video/mp4")
+
+    return Response(
+        content=video_bytes,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Accept-Ranges": "bytes",
+        },
+    )
+
+
+# ============================================================================
 # ASYNC VIDEO CLASSIFICATION ENDPOINTS (ProcessPoolExecutor)
 # ============================================================================
 
