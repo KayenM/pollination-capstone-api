@@ -223,27 +223,33 @@ For local development:
                            │ HTTP/REST
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│              Render.com (FastAPI Application)                │
+│              Hugging Space (FastAPI Application)            │
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │  API Routes:                                         │   │
-│  │  - POST /api/classify                                │   │
-│  │  - GET /api/heatmap-data                             │   │
+│  │  - POST /api/classify (Images)                      │   │
+│  │  - POST /api/classify-video (Videos - Sync)         │   │
+│  │  - POST /api/classify-video-async (Videos - Async)  │   │
+│  │  - GET /api/heatmap-data                            │   │
 │  │  - GET /api/classifications/{id}                     │   │
-│  │  - GET /api/images/{id}                              │   │
+│  │  - GET /api/images/{id}                             │   │
+│  │  - GET /api/videos/{id}                              │   │
+│  │  - GET /api/jobs/{id} (Job Status)                  │   │
 │  └──────────────────────────────────────────────────────┘   │
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │  Services:                                           │   │
-│  │  - ML Model (Classification)                         │   │
-│  │  - Image Processing (EXIF GPS)                       │   │
-│  │  - MongoDB Client (Motor)                            │   │
+│  │  - ML Model (YOLOv8 - Images & Videos)              │   │
+│  │  - Image/Video Processing (EXIF GPS, Annotation)     │   │
+│  │  - ProcessPoolExecutor (Async Video Workers)         │   │
+│  │  - MongoDB Client (Motor + GridFS)                  │   │
 │  └──────────────────────────────────────────────────────┘   │
 └──────────────────────────┬──────────────────────────────────┘
                            │ MongoDB Connection
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
 │              MongoDB Atlas (Cloud Database)                  │
-│  - Stores classifications                                    │
-│  - Stores images as base64                                   │
+│  - Stores image classifications (base64)                    │
+│  - Stores video classifications (GridFS)                    │
+│  - Stores job tracking records                               │
 │  - Persistent storage                                        │
 └─────────────────────────────────────────────────────────────┘
 ```
