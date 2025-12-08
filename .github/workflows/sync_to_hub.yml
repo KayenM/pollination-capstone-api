@@ -19,24 +19,19 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          # 1. Configure a generic Git user for the runner (required for git commands to work)
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
-
-          # 2. Add Hugging Face as a remote destination
-          # We use your username and the token secret to authenticate
+          
           git remote add space https://deenp03:$HF_TOKEN@huggingface.co/spaces/deenp03/capstone-backend
           
-          # 3. Fetch the Space's current history
+          # Force fetch to ensure we can see the remote history
           git fetch space main
-
-          # 4. KEY STEP: Force-overwrite the local README with the one from Hugging Face
-          # This ensures we never accidentally delete your Hugging Face metadata
+          
+          # Overwrite local Readme with the one from Hugging Face
           git checkout space/main -- README.md
           
-          # 5. Commit this change locally (so the push includes the correct README)
-          # The '|| echo' part prevents the script from crashing if the READMEs are already identical
+          # Commit the HF Readme (if changed)
           git commit -m "Sync: Preserve Hugging Face README" || echo "README already matches"
-
-          # 6. Push everything to Hugging Face
-          git push space main
+          
+          # FINAL STEP: Force push to overwrite HF history with GitHub history
+          git push --force space main
