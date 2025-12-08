@@ -3,7 +3,6 @@ name: Sync to Hugging Face Hub
 on:
   push:
     branches: [main]
-  # Allows you to run this manually from the Actions tab for testing
   workflow_dispatch:
 
 jobs:
@@ -33,7 +32,38 @@ jobs:
           # Commit the HF Readme (if changed)
           git commit -m "Sync: Preserve Hugging Face README" || echo "README already matches"
 
+          # Allow pushing even if local LFS files are missing
           git config lfs.allowincompletepush true
           
-          # FINAL STEP: Force push to overwrite HF history with GitHub history
+          # Force push to overwrite HF history with GitHub history
           git push --force space main
+
+      - name: Wait for Healthy Deployment
+        run: |
+          echo "Waiting for Hugging Face Space to be healthy..."
+          url="https://deenp03-capstone-backend.hf.space/health"
+          # Timeout in seconds (600s = 10 minutes) to allow for container build time
+          timeout=600
+          start_time=$(date +%s)
+          
+          while true; do
+            current_time=$(date +%s)
+            elapsed=$((current_time - start_time))
+            
+            # Check if we have exceeded the timeout
+            if [ $elapsed -gt $timeout ]; then
+              echo "❌ Timeout reached ($timeout seconds). Deployment might have failed or is taking too long."
+              exit 1
+            fi
+            
+            # Get HTTP status code
+            status_code=$(curl -s -o /dev/null -w "%{http_code}" $url)
+            
+            if [ "$status_code" == "200" ]; then
+              echo "✅ Success! Endpoint returned 200 OK."
+              break
+            else
+              echo "⏳ Status: $status_code. Waiting... (${elapsed}s elapsed)"
+              sleep 15
+            fi
+          done
