@@ -11,7 +11,7 @@ class Settings:
     
     # Server configuration
     HOST: str = os.getenv("HOST", "0.0.0.0")
-    PORT: int = int(os.getenv("PORT", "8000"))
+    PORT: int = int(os.getenv("PORT", "7860"))  # HuggingFace Spaces default port
     
     # CORS configuration
     CORS_ORIGINS: List[str] = os.getenv("CORS_ORIGINS", "*").split(",")

@@ -1,4 +1,4 @@
-# Dockerfile for Render.com deployment
+# Dockerfile for HuggingFace Spaces and Render.com deployment
 FROM python:3.11-slim
 
 # Set working directory
@@ -35,10 +35,10 @@ COPY app/ ./app/
 # Create uploads directory (for temporary processing)
 RUN mkdir -p uploads/images
 
-# Expose port (Render sets PORT environment variable)
-EXPOSE 8000
+# Expose port 7860 (HuggingFace Spaces default)
+EXPOSE 7860
 
 # Run the application
-# PORT is set automatically by Render
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Uses PORT environment variable if set (Render), defaults to 7860 (HuggingFace Spaces)
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-7860}
 
