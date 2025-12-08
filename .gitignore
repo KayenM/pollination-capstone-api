@@ -67,6 +67,19 @@ IMG_*.jpeg
 IMG_*.jpg
 *.png
 
+# Video
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.wmv
+*.flv
+*.f4v
+*.f4p
+*.f4a
+*.f4b
+
 # OS
 .DS_Store
 Thumbs.db

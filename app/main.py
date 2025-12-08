@@ -24,6 +24,7 @@ from .database_mongodb import (
     close_mongodb_connection,
     create_indexes,
     ClassificationRecord,
+    VideoClassificationRecord,
     get_database,
 )
 from .models import (
@@ -33,8 +34,15 @@ from .models import (
     FlowerDetection,
     Location,
     HealthResponse,
+    VideoClassificationResponse,
+    FrameStatistics,
 )
-from .ml_model import classify_image, generate_annotated_image
+from .ml_model import (
+    classify_image,
+    generate_annotated_image,
+    classify_video,
+    generate_annotated_video,
+)
 from .utils import extract_gps_coordinates
 from .config import settings
 
@@ -160,6 +168,9 @@ async def classify_flower_image(
     for detection in detections:
         stage = detection["stage"]
         stage_summary[stage] = stage_summary.get(stage, 0) + 1
+    
+    # Convert to string keys for consistency
+    stage_summary = {str(k): v for k, v in stage_summary.items()}
 
     # Save to MongoDB (only annotated image is stored)
     try:
@@ -229,6 +240,9 @@ async def get_heatmap_data():
         for flower in flowers_data:
             stage = flower.get("stage", 0)
             stage_counts[stage] = stage_counts.get(stage, 0) + 1
+        
+        # Convert to string keys for consistency
+        stage_counts = {str(k): v for k, v in stage_counts.items()}
 
         flowers = [
             FlowerDetection(
@@ -280,6 +294,9 @@ async def get_classification(record_id: str):
     for flower in flowers_data:
         stage = flower.get("stage", 0)
         stage_summary[stage] = stage_summary.get(stage, 0) + 1
+    
+    # Convert to string keys for consistency
+    stage_summary = {str(k): v for k, v in stage_summary.items()}
 
     flowers = [
         FlowerDetection(
@@ -359,6 +376,314 @@ async def delete_classification(record_id: str):
         raise HTTPException(status_code=404, detail="Classification not found")
 
     return {"message": "Classification deleted successfully", "id": record_id}
+
+
+# ============================================================================
+# VIDEO CLASSIFICATION ENDPOINTS
+# ============================================================================
+
+@app.post("/api/classify-video", response_model=VideoClassificationResponse)
+async def classify_flower_video(
+    file: UploadFile = File(..., description="Video file of tomato plant"),
+    latitude: Optional[float] = Form(None, description="Manual latitude override"),
+    longitude: Optional[float] = Form(None, description="Manual longitude override"),
+    include_frame_details: bool = Form(False, description="Include per-frame statistics in response"),
+):
+    """
+    Upload a video of a tomato plant and get flower classifications across all frames.
+    
+    The endpoint will:
+    1. Process each frame of the video with the ML model
+    2. Generate an annotated video with bounding boxes and labels
+    3. Store the annotated video in MongoDB (using GridFS for large files)
+    4. Return aggregated statistics and optionally frame-by-frame details
+    
+    Note: Video processing can take several minutes depending on video length.
+    """
+    # Validate file type
+    if not file.content_type or not file.content_type.startswith("video/"):
+        raise HTTPException(
+            status_code=400,
+            detail="File must be a video (MP4, AVI, MOV, etc.)",
+        )
+
+    # Read video contents
+    video_bytes = await file.read()
+    
+    # Generate unique ID
+    record_id = str(uuid.uuid4())
+    temp_dir = "/tmp"
+    temp_video_path = os.path.join(temp_dir, f"{record_id}_input.mp4")
+    temp_output_path = os.path.join(temp_dir, f"{record_id}_output.mp4")
+
+    try:
+        # Save uploaded video to temporary file
+        with open(temp_video_path, 'wb') as f:
+            f.write(video_bytes)
+
+        # Run classification on video
+        try:
+            classification_result = classify_video(temp_video_path)
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error running video classification: {str(e)}",
+            )
+
+        # Generate annotated video with bounding boxes
+        try:
+            generate_annotated_video(
+                temp_video_path,
+                temp_output_path,
+                confidence_threshold=0.25
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error generating annotated video: {str(e)}",
+            )
+
+        # Read the annotated video
+        if not os.path.exists(temp_output_path):
+            raise HTTPException(
+                status_code=500,
+                detail="Annotated video was not generated successfully",
+            )
+        
+        with open(temp_output_path, 'rb') as f:
+            annotated_video_bytes = f.read()
+
+        # Store in MongoDB (using GridFS for large files)
+        try:
+            await VideoClassificationRecord.create(
+                record_id=record_id,
+                video_bytes=annotated_video_bytes,
+                latitude=latitude,
+                longitude=longitude,
+                frame_results=classification_result['frame_results'],
+                video_metadata={
+                    'total_frames': classification_result['total_frames'],
+                    'fps': classification_result['fps'],
+                    'duration': classification_result['duration']
+                },
+                filename=file.filename or "video.mp4"
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error saving to database: {str(e)}",
+            )
+
+        # Get the saved record to build response
+        record = await VideoClassificationRecord.get_by_id(record_id)
+
+        # Build frame statistics if requested
+        frame_statistics_list = None
+        if include_frame_details:
+            frame_statistics_list = []
+            for frame_num, frame_detections in enumerate(classification_result['frame_results']):
+                # Calculate stage counts for this frame
+                stage_counts = {0: 0, 1: 0, 2: 0}
+                for det in frame_detections:
+                    stage = det['stage']
+                    stage_counts[stage] = stage_counts.get(stage, 0) + 1
+                
+                # Build FlowerDetection objects
+                flowers = [
+                    FlowerDetection(
+                        bounding_box=d["bounding_box"],
+                        stage=d["stage"],
+                        confidence=d["confidence"],
+                    )
+                    for d in frame_detections
+                ]
+                
+                frame_statistics_list.append(
+                    FrameStatistics(
+                        frame_number=frame_num,
+                        detections=flowers,
+                        stage_counts=stage_counts,
+                    )
+                )
+
+        return VideoClassificationResponse(
+            id=record_id,
+            video_path=f"/api/videos/{record_id}",
+            location=Location(latitude=latitude, longitude=longitude),
+            timestamp=record["timestamp"],
+            total_frames=record["total_frames"],
+            fps=record["fps"],
+            duration_seconds=record["duration_seconds"],
+            total_detections=record["total_detections"],
+            average_flowers_per_frame=record["average_flowers_per_frame"],
+            stage_summary=record["stage_summary"],
+            frame_statistics=frame_statistics_list,
+        )
+
+    finally:
+        # Cleanup temporary files
+        if os.path.exists(temp_video_path):
+            os.remove(temp_video_path)
+        if os.path.exists(temp_output_path):
+            os.remove(temp_output_path)
+
+
+@app.get("/api/videos/{record_id}")
+async def get_video(record_id: str):
+    """
+    Retrieve the annotated video (with bounding boxes and labels) for a video classification.
+    
+    Note: Only annotated videos are stored. The video includes bounding boxes,
+    stage labels, and confidence scores drawn on each frame.
+    """
+    try:
+        video_bytes = await VideoClassificationRecord.get_video_bytes(record_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving video: {str(e)}",
+        )
+
+    if not video_bytes:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    # Get record for filename
+    record = await VideoClassificationRecord.get_by_id(record_id)
+    filename = record.get("video_filename", "video.mp4") if record else "video.mp4"
+
+    return Response(
+        content=video_bytes,
+        media_type="video/mp4",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Accept-Ranges": "bytes",  # Enable video seeking
+        }
+    )
+
+
+@app.get("/api/video-classifications/{record_id}", response_model=VideoClassificationResponse)
+async def get_video_classification(
+    record_id: str,
+    include_frame_details: bool = False
+):
+    """
+    Get a specific video classification result by ID.
+    
+    Args:
+        record_id: The video classification ID
+        include_frame_details: Include detailed per-frame statistics (may be large)
+    """
+    try:
+        record = await VideoClassificationRecord.get_by_id(record_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving video classification: {str(e)}",
+        )
+
+    if not record:
+        raise HTTPException(status_code=404, detail="Video classification not found")
+
+    # Build frame statistics if requested
+    frame_statistics_list = None
+    if include_frame_details:
+        frame_results = record.get("frame_results", [])
+        frame_statistics_list = []
+        
+        for frame_num, frame_detections in enumerate(frame_results):
+            # Calculate stage counts for this frame
+            stage_counts = {0: 0, 1: 0, 2: 0}
+            for det in frame_detections:
+                stage = det['stage']
+                stage_counts[stage] = stage_counts.get(stage, 0) + 1
+            
+            # Build FlowerDetection objects
+            flowers = [
+                FlowerDetection(
+                    bounding_box=d["bounding_box"],
+                    stage=d["stage"],
+                    confidence=d["confidence"],
+                )
+                for d in frame_detections
+            ]
+            
+            frame_statistics_list.append(
+                FrameStatistics(
+                    frame_number=frame_num,
+                    detections=flowers,
+                    stage_counts=stage_counts,
+                )
+            )
+
+    return VideoClassificationResponse(
+        id=record["id"],
+        video_path=f"/api/videos/{record_id}",
+        location=Location(
+            latitude=record.get("latitude"),
+            longitude=record.get("longitude")
+        ),
+        timestamp=record["timestamp"],
+        total_frames=record["total_frames"],
+        fps=record["fps"],
+        duration_seconds=record["duration_seconds"],
+        total_detections=record["total_detections"],
+        average_flowers_per_frame=record["average_flowers_per_frame"],
+        stage_summary=record["stage_summary"],
+        frame_statistics=frame_statistics_list,
+    )
+
+
+@app.get("/api/video-classifications", response_model=list)
+async def list_video_classifications():
+    """
+    Get a list of all video classification records (metadata only, no frame details).
+    """
+    try:
+        records = await VideoClassificationRecord.get_all()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving video classifications: {str(e)}",
+        )
+
+    results = []
+    for record in records:
+        results.append({
+            "id": record["id"],
+            "video_path": f"/api/videos/{record['id']}",
+            "location": {
+                "latitude": record.get("latitude"),
+                "longitude": record.get("longitude")
+            },
+            "timestamp": record["timestamp"],
+            "total_frames": record["total_frames"],
+            "fps": record["fps"],
+            "duration_seconds": record["duration_seconds"],
+            "total_detections": record["total_detections"],
+            "average_flowers_per_frame": record["average_flowers_per_frame"],
+            "stage_summary": record["stage_summary"],
+        })
+
+    return results
+
+
+@app.delete("/api/video-classifications/{record_id}")
+async def delete_video_classification(record_id: str):
+    """
+    Delete a video classification and its associated video from MongoDB.
+    """
+    try:
+        deleted = await VideoClassificationRecord.delete_by_id(record_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error deleting video classification: {str(e)}",
+        )
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Video classification not found")
+
+    return {"message": "Video classification deleted successfully", "id": record_id}
 
 
 if __name__ == "__main__":

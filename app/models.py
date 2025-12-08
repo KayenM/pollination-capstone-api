@@ -86,3 +86,41 @@ class HealthResponse(BaseModel):
     database: str
     timestamp: datetime
 
+
+class FrameStatistics(BaseModel):
+    """Statistics for a single video frame."""
+    frame_number: int = Field(..., description="Frame number (0-indexed)")
+    detections: List[FlowerDetection] = Field(
+        default_factory=list,
+        description="All flower detections in this frame"
+    )
+    stage_counts: dict = Field(
+        default_factory=lambda: {0: 0, 1: 0, 2: 0},
+        description="Count of flowers at each stage in this frame: {0: n, 1: n, 2: n}"
+    )
+
+
+class VideoClassificationResponse(BaseModel):
+    """Response from video classification endpoint."""
+    id: str
+    video_path: str = Field(..., description="API endpoint to retrieve the annotated video")
+    location: Location
+    timestamp: datetime
+    total_frames: int = Field(..., description="Total number of frames in the video")
+    fps: float = Field(..., description="Frames per second")
+    duration_seconds: float = Field(..., description="Video duration in seconds")
+    
+    # Aggregated statistics across all frames
+    total_detections: int = Field(..., description="Total flower detections across all frames")
+    average_flowers_per_frame: float = Field(..., description="Average number of flowers per frame")
+    stage_summary: dict = Field(
+        ..., 
+        description="Overall count of flowers at each stage: {0: n, 1: n, 2: n}"
+    )
+    
+    # Frame-by-frame breakdown (optional, can be large)
+    frame_statistics: Optional[List[FrameStatistics]] = Field(
+        None,
+        description="Detailed statistics for each frame (may be omitted for large videos)"
+    )
+
