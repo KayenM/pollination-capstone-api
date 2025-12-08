@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
-from fastapi.responses import Response
+from fastapi.responses import Response, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database_mongodb import (
@@ -58,7 +58,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 @app.on_event("startup")
 async def startup_event():
     """Initialize MongoDB connection on startup."""
@@ -70,14 +69,16 @@ async def startup_event():
         print(f"Warning: Failed to connect to MongoDB: {e}")
         print("API will still start, but database operations will fail until MongoDB is configured.")
 
-
 @app.on_event("shutdown")
 async def shutdown_event():
     """Close MongoDB connection on shutdown."""
     await close_mongodb_connection()
 
+@app.get("/")
+async def root():
+    return RedirectResponse(url="/docs")
 
-@app.get("/", response_model=HealthResponse)
+@app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint."""
     try:
@@ -87,13 +88,12 @@ async def health_check():
         db_status = "connected"
     except Exception as e:
         db_status = f"error: {str(e)}"
-
+    
     return HealthResponse(
         status="healthy",
         database=db_status,
         timestamp=datetime.utcnow(),
     )
-
 
 @app.post("/api/classify", response_model=ClassificationResponse)
 async def classify_flower_image(
