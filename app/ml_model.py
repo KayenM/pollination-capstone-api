@@ -14,6 +14,7 @@ from typing import List, Dict, Any, Optional
 from PIL import Image
 import io
 import logging
+import cv2
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -268,16 +269,19 @@ def generate_annotated_image(
             result = results[0]
             
             # Plot the results on the image
-            # The plot() method returns a numpy array with the annotated image
-            annotated_array = result.plot(
+            # The plot() method returns a numpy array in BGR format (OpenCV style)
+            annotated_array_bgr = result.plot(
                 conf=True,  # Show confidence scores
                 labels=True,  # Show class labels
                 boxes=True,  # Show bounding boxes
                 line_width=2,  # Box line width
             )
             
+            # Convert BGR to RGB (YOLO's plot() returns BGR, PIL expects RGB)
+            annotated_array_rgb = cv2.cvtColor(annotated_array_bgr, cv2.COLOR_BGR2RGB)
+            
             # Convert numpy array back to PIL Image
-            annotated_image = Image.fromarray(annotated_array)
+            annotated_image = Image.fromarray(annotated_array_rgb)
             
             # Convert to bytes
             output_buffer = io.BytesIO()
