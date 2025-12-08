@@ -32,6 +32,8 @@ jobs:
           
           # Commit the HF Readme (if changed)
           git commit -m "Sync: Preserve Hugging Face README" || echo "README already matches"
+
+          git config lfs.allowincompletepush true
           
           # FINAL STEP: Force push to overwrite HF history with GitHub history
           git push --force space main
