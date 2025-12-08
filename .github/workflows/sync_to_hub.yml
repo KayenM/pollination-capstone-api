@@ -38,32 +38,48 @@ jobs:
           # Force push to overwrite HF history with GitHub history
           git push --force space main
 
-      - name: Wait for Healthy Deployment
+      - name: Wait for Deployment
+        env:
+          SPACE_ID: "deenp03/capstone-backend"
         run: |
-          echo "Waiting for Hugging Face Space to be healthy..."
-          url="https://deenp03-capstone-backend.hf.space/health"
-          # Timeout in seconds (600s = 10 minutes) to allow for container build time
-          timeout=600
-          start_time=$(date +%s)
+          pip install huggingface_hub
+
+          python -c "
+          import time
+          import os
+          import sys
+          from huggingface_hub import HfApi
+
+          # No token needed for public spaces!
+          api = HfApi()
+          repo_id = os.environ['SPACE_ID']
           
-          while true; do
-            current_time=$(date +%s)
-            elapsed=$((current_time - start_time))
-            
-            # Check if we have exceeded the timeout
-            if [ $elapsed -gt $timeout ]; then
-              echo "❌ Timeout reached ($timeout seconds). Deployment might have failed or is taking too long."
-              exit 1
-            fi
-            
-            # Get HTTP status code
-            status_code=$(curl -s -o /dev/null -w "%{http_code}" $url)
-            
-            if [ "$status_code" == "200" ]; then
-              echo "✅ Success! Endpoint returned 200 OK."
-              break
-            else
-              echo "⏳ Status: $status_code. Waiting... (${elapsed}s elapsed)"
-              sleep 15
-            fi
-          done
+          # Get the SHA we just pushed from the local git repo
+          target_sha = os.popen('git rev-parse HEAD').read().strip()
+          print(f'🚀 Target Commit SHA: {target_sha}')
+
+          print('⏳ Waiting for Hugging Face to match this SHA...')
+          
+          # Timeout after 15 minutes
+          start_time = time.time()
+          while True:
+              if time.time() - start_time > 900:
+                  print('❌ Timeout: Deployment took too long.')
+                  sys.exit(1)
+              
+              try:
+                  info = api.space_info(repo_id=repo_id)
+                  current_sha = info.sha
+                  stage = info.runtime.stage
+                  
+                  print(f'   Status: {stage} | Current SHA: {current_sha[:7]}')
+
+                  # Check if the SHA matches AND the app is actually running
+                  if current_sha == target_sha and stage == 'RUNNING':
+                      print('✅ Deployment Successful!')
+                      sys.exit(0)
+              except Exception as e:
+                  print(f'   Error querying API: {e}')
+              
+              time.sleep(15)
+          "
