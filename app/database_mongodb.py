@@ -172,6 +172,14 @@ class ClassificationRecord:
         return result.deleted_count > 0
     
     @staticmethod
+    async def delete_all() -> int:
+        """Delete all classification records."""
+        db = get_database()
+        collection = db["classifications"]
+        result = await collection.delete_many({})
+        return result.deleted_count
+
+    @staticmethod
     async def count() -> int:
         """Get total number of classification records."""
         db = get_database()
@@ -341,6 +349,25 @@ class VideoClassificationRecord:
         return result.deleted_count > 0
     
     @staticmethod
+    async def delete_all() -> int:
+        """Delete all video classification records and their GridFS video files."""
+        db = get_database()
+        bucket = get_gridfs_bucket()
+        collection = db["video_classifications"]
+
+        records = await collection.find({}, {"video_gridfs_id": 1}).to_list(length=None)
+        for record in records:
+            video_id = record.get("video_gridfs_id")
+            if video_id:
+                try:
+                    await bucket.delete(video_id)
+                except Exception as e:
+                    logger.error(f"Error deleting video from GridFS: {e}")
+
+        result = await collection.delete_many({})
+        return result.deleted_count
+
+    @staticmethod
     async def count() -> int:
         """Get total number of video classification records."""
         db = get_database()
@@ -444,6 +471,14 @@ class JobRecord:
         result = await collection.delete_one({"job_id": job_id})
         return result.deleted_count > 0
     
+    @staticmethod
+    async def delete_all() -> int:
+        """Delete all job records."""
+        db = get_database()
+        collection = db["jobs"]
+        result = await collection.delete_many({})
+        return result.deleted_count
+
     @staticmethod
     async def cleanup_old_jobs(days: int = 7) -> int:
         """Delete job records older than specified days."""
