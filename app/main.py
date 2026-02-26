@@ -967,6 +967,32 @@ async def cancel_job(job_id: str):
     return {"message": "Job deleted successfully", "job_id": job_id}
 
 
+@app.delete("/api/data")
+async def delete_all_data():
+    """
+    Delete ALL records from the database, including classifications,
+    video classifications (and their GridFS files), and jobs.
+    """
+    try:
+        classifications_deleted = await ClassificationRecord.delete_all()
+        videos_deleted = await VideoClassificationRecord.delete_all()
+        jobs_deleted = await JobRecord.delete_all()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error deleting data: {str(e)}",
+        )
+
+    return {
+        "message": "All data deleted successfully",
+        "deleted": {
+            "classifications": classifications_deleted,
+            "video_classifications": videos_deleted,
+            "jobs": jobs_deleted,
+        },
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host=settings.HOST, port=settings.PORT)
