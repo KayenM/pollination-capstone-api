@@ -2,7 +2,7 @@
 MongoDB database setup and models for storing classification results.
 Uses Motor (async MongoDB driver) for FastAPI integration.
 """
-
+import time
 import os
 import base64
 from datetime import datetime, timedelta
@@ -154,14 +154,28 @@ class ClassificationRecord:
         db = get_database()
         collection = db["classifications"]
         return await collection.find_one({"id": record_id})
-    
+
     @staticmethod
     async def get_all() -> List[Dict[str, Any]]:
-        """Get all classification records, sorted by timestamp."""
         db = get_database()
         collection = db["classifications"]
-        cursor = collection.find({}).sort("timestamp", -1)
-        return await cursor.to_list(length=None)
+
+        cursor = (
+            collection
+            .find(
+                {},
+                {
+                    "id": 1,
+                    "flowers": 1,
+                    "timestamp": 1,
+                    "_id": 0,   # exclude Mongo ObjectId
+                },
+            )
+            .sort("timestamp", -1)
+        )
+
+        return await cursor.to_list(length=None) 
+    
     
     @staticmethod
     async def delete_by_id(record_id: str) -> bool:
