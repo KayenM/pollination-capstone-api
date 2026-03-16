@@ -61,10 +61,7 @@ uploads/
 *.pb
 
 # Test Images - Don't commit test data
-test_image.jpg
-test_annotated_output.jpg
-IMG_*.jpeg
-IMG_*.jpg
+*.jpg
 *.png
 
 # Video
