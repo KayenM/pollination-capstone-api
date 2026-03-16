@@ -63,6 +63,42 @@ class ClassificationResponse(BaseModel):
     )
 
 
+class TomatoDetection(BaseModel):
+    """A single tomato detection with bounding box and ripeness classification."""
+    bounding_box: List[float] = Field(
+        ...,
+        description="Bounding box as [x_min, y_min, x_max, y_max]",
+        min_length=4,
+        max_length=4
+    )
+    ripeness: int = Field(
+        ...,
+        ge=0,
+        le=2,
+        description="Tomato ripeness: 0=unripe, 1=half-ripe, 2=ripe"
+    )
+    confidence: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Model confidence score"
+    )
+
+
+class TomatoClassificationResponse(BaseModel):
+    """Response from the tomato ripeness classification endpoint."""
+    id: str
+    image_path: str
+    location: Location
+    timestamp: datetime
+    tomatoes: List[TomatoDetection]
+    tomato_count: int
+    ripeness_summary: dict = Field(
+        ...,
+        description="Count of tomatoes at each ripeness level: {'0': n, '1': n, '2': n}"
+    )
+
+
 class HeatmapDataPoint(BaseModel):
     """A single data point for the heatmap."""
     id: str

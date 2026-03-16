@@ -40,12 +40,16 @@ from .models import (
     VideoClassificationResponse,
     FrameStatistics,
     JobStatusResponse,
+    TomatoDetection,
+    TomatoClassificationResponse,
 )
 from .ml_model import (
     classify_image,
     generate_annotated_image,
     classify_video,
     generate_annotated_video,
+    classify_tomatoes,
+    generate_tomato_annotated_image,
 )
 from .utils import extract_gps_coordinates
 from .config import settings
@@ -218,6 +222,102 @@ async def classify_flower_image(
         flowers=flower_detections,
         flower_count=len(detections),
         stage_summary=stage_summary,
+    )
+
+
+@app.post("/api/classify-tomatoes", response_model=TomatoClassificationResponse)
+async def classify_tomato_image(
+    file: UploadFile = File(..., description="Image file of tomatoes"),
+    latitude: Optional[float] = Form(None, description="Manual latitude override"),
+    longitude: Optional[float] = Form(None, description="Manual longitude override"),
+):
+    """
+    Upload an image of tomatoes and get ripeness classifications.
+
+    The endpoint will:
+    1. Extract GPS coordinates from image EXIF data (or use provided coordinates)
+    2. Run the tomato ripeness ML model to detect tomatoes and classify their ripeness
+    3. Store the results in MongoDB (including the annotated image)
+    4. Return the classification results
+
+    Ripeness levels:
+    - 0: Unripe
+    - 1: Half-ripe
+    - 2: Ripe
+    """
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=400,
+            detail="File must be an image (JPEG, PNG, etc.)",
+        )
+
+    image_bytes = await file.read()
+
+    if latitude is None or longitude is None:
+        exif_lat, exif_lon = extract_gps_coordinates(image_bytes)
+        latitude = latitude if latitude is not None else exif_lat
+        longitude = longitude if longitude is not None else exif_lon
+
+    record_id = str(uuid.uuid4())
+    file_extension = os.path.splitext(file.filename or "image.jpg")[1] or ".jpg"
+    image_filename = f"{record_id}{file_extension}"
+
+    try:
+        detections = classify_tomatoes(image_bytes)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error running tomato classification model: {str(e)}",
+        )
+
+    try:
+        annotated_image_bytes = generate_tomato_annotated_image(image_bytes)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generating annotated image: {str(e)}",
+        )
+
+    ripeness_summary = {0: 0, 1: 0, 2: 0}
+    for detection in detections:
+        r = detection["ripeness"]
+        ripeness_summary[r] = ripeness_summary.get(r, 0) + 1
+    ripeness_summary = {str(k): v for k, v in ripeness_summary.items()}
+
+    try:
+        await ClassificationRecord.create(
+            record_id=record_id,
+            image_bytes=annotated_image_bytes,
+            latitude=latitude,
+            longitude=longitude,
+            flowers=[{"bounding_box": d["bounding_box"], "stage": d["ripeness"], "confidence": d["confidence"]} for d in detections],
+            filename=image_filename,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error saving to database: {str(e)}",
+        )
+
+    tomato_detections = [
+        TomatoDetection(
+            bounding_box=d["bounding_box"],
+            ripeness=d["ripeness"],
+            confidence=d["confidence"],
+        )
+        for d in detections
+    ]
+
+    record = await ClassificationRecord.get_by_id(record_id)
+
+    return TomatoClassificationResponse(
+        id=record_id,
+        image_path=f"/api/images/{record_id}",
+        location=Location(latitude=latitude, longitude=longitude),
+        timestamp=record["timestamp"],
+        tomatoes=tomato_detections,
+        tomato_count=len(detections),
+        ripeness_summary=ripeness_summary,
     )
 
 

@@ -23,16 +23,28 @@ logger = logging.getLogger(__name__)
 # Stage labels for reference
 STAGE_LABELS = {
     0: "bud",
-    1: "anthesis", 
+    1: "anthesis",
     2: "post-anthesis"
+}
+
+# Tomato ripeness labels
+TOMATO_RIPENESS_LABELS = {
+    0: "unripe",
+    1: "half-ripe",
+    2: "ripe",
 }
 
 # Global model cache (load once, reuse for all requests)
 _model_cache: Optional[Any] = None
+_tomato_model_cache: Optional[Any] = None
 
 # Hugging Face model configuration
 HF_REPO_ID = "deenp03/tomato_pollination_stage_classifier"
 HF_MODEL_FILENAME = "best.pt"
+
+# Tomato ripeness model configuration
+HF_TOMATO_REPO_ID = "deenp03/tomato-ripeness-classifier"
+HF_TOMATO_MODEL_FILENAME = "ripeness_best.pt"
 
 
 def load_model(model_path: Optional[str] = None, force_reload: bool = False):
@@ -337,6 +349,166 @@ def get_model_info() -> Dict[str, Any]:
             "error": str(e),
             "loaded": False
         }
+
+
+def load_tomato_model(force_reload: bool = False):
+    """
+    Load the tomato ripeness YOLO model from Hugging Face Hub.
+
+    Args:
+        force_reload: Force reload even if model is cached
+
+    Returns:
+        Loaded YOLO model ready for inference
+    """
+    global _tomato_model_cache
+
+    if _tomato_model_cache is not None and not force_reload:
+        logger.info("Using cached tomato ripeness YOLO model")
+        return _tomato_model_cache
+
+    try:
+        from ultralytics import YOLO
+        from huggingface_hub import hf_hub_download
+    except ImportError as e:
+        raise ImportError(
+            "Required packages not installed. Install with: pip install ultralytics huggingface_hub"
+        ) from e
+
+    logger.info(f"Downloading tomato ripeness model from Hugging Face: {HF_TOMATO_REPO_ID}/{HF_TOMATO_MODEL_FILENAME}")
+    try:
+        model_path = hf_hub_download(
+            repo_id=HF_TOMATO_REPO_ID,
+            filename=HF_TOMATO_MODEL_FILENAME
+        )
+        logger.info(f"Tomato ripeness model downloaded to: {model_path}")
+    except Exception as e:
+        logger.error(f"Failed to download tomato ripeness model from Hugging Face: {e}")
+        raise RuntimeError(
+            f"Failed to download tomato ripeness model from Hugging Face"
+        ) from e
+
+    logger.info(f"Loading tomato ripeness YOLO model from: {model_path}")
+    model = YOLO(model_path)
+    _tomato_model_cache = model
+    logger.info("Tomato ripeness YOLO model loaded successfully")
+    return model
+
+
+def classify_tomatoes(
+    image_bytes: bytes,
+    confidence_threshold: float = 0.25,
+) -> List[Dict[str, Any]]:
+    """
+    Classify tomato ripeness in an image using the ripeness YOLO model.
+
+    Args:
+        image_bytes: Raw image bytes
+        confidence_threshold: Minimum confidence for detections (default: 0.25)
+
+    Returns:
+        List of tomato detections with bounding boxes and ripeness classifications
+        Each detection: {"bounding_box": [...], "ripeness": int, "confidence": float}
+    """
+    try:
+        image = Image.open(io.BytesIO(image_bytes))
+        if image.mode != "RGB":
+            logger.info(f"Converting image from {image.mode} to RGB")
+            image = image.convert("RGB")
+
+        model = load_tomato_model()
+
+        logger.info(f"Running tomato ripeness inference on image of size {image.size}")
+        results = model.predict(
+            source=image,
+            conf=confidence_threshold,
+            verbose=False
+        )
+
+        detections = []
+        if not results or len(results) == 0:
+            return detections
+
+        result = results[0]
+        if result.boxes is None or len(result.boxes) == 0:
+            logger.info("No tomatoes detected in image")
+            return detections
+
+        boxes = result.boxes.xyxy.cpu().numpy()
+        confidences = result.boxes.conf.cpu().numpy()
+        classes = result.boxes.cls.cpu().numpy()
+
+        for box, conf, cls in zip(boxes, confidences, classes):
+            if conf < confidence_threshold:
+                continue
+            ripeness = int(cls)
+            if ripeness not in TOMATO_RIPENESS_LABELS:
+                logger.warning(f"Unexpected class index {ripeness}, mapping to 0")
+                ripeness = 0
+            detections.append({
+                "bounding_box": [float(box[0]), float(box[1]), float(box[2]), float(box[3])],
+                "ripeness": ripeness,
+                "confidence": float(conf),
+            })
+
+        logger.info(f"Detected {len(detections)} tomatoes (conf >= {confidence_threshold})")
+        return detections
+
+    except Exception as e:
+        logger.error(f"Error in classify_tomatoes: {str(e)}")
+        raise
+
+
+def generate_tomato_annotated_image(
+    image_bytes: bytes,
+    confidence_threshold: float = 0.25,
+) -> bytes:
+    """
+    Generate an annotated image with tomato ripeness bounding boxes and labels.
+
+    Args:
+        image_bytes: Raw image bytes
+        confidence_threshold: Minimum confidence for detections
+
+    Returns:
+        Annotated image as bytes (JPEG format)
+    """
+    try:
+        image = Image.open(io.BytesIO(image_bytes))
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+
+        model = load_tomato_model()
+
+        logger.info(f"Running tomato ripeness inference for annotated image, size {image.size}")
+        results = model.predict(
+            source=image,
+            conf=confidence_threshold,
+            verbose=False
+        )
+
+        if results and len(results) > 0:
+            result = results[0]
+            annotated_array_bgr = result.plot(
+                conf=True,
+                labels=True,
+                boxes=True,
+                line_width=2,
+            )
+            annotated_array_rgb = cv2.cvtColor(annotated_array_bgr, cv2.COLOR_BGR2RGB)
+            annotated_image = Image.fromarray(annotated_array_rgb)
+            output_buffer = io.BytesIO()
+            annotated_image.save(output_buffer, format='JPEG', quality=95)
+            logger.info(f"Generated tomato annotated image with {len(result.boxes) if result.boxes else 0} detections")
+            return output_buffer.getvalue()
+        else:
+            output_buffer = io.BytesIO()
+            image.save(output_buffer, format='JPEG', quality=95)
+            return output_buffer.getvalue()
+
+    except Exception as e:
+        logger.error(f"Error in generate_tomato_annotated_image: {str(e)}")
+        raise
 
 
 def classify_video(
