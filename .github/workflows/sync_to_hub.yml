@@ -32,9 +32,9 @@ jobs:
           # Commit the HF Readme (if changed)
           git commit -m "Sync: Preserve Hugging Face README" || echo "README already matches"
 
-          # Allow pushing even if local LFS files are missing
-          git config lfs.allowincompletepush true
-          
+          # Disable LFS so HF doesn't reject the push with an LFS protocol error
+          git lfs uninstall
+
           # Force push to overwrite HF history with GitHub history
           git push --force space main
 
